@@ -1,4 +1,4 @@
-# cdp-console
+# cdp-client
 
 一个极简命令行工具，通过 Chrome DevTools Protocol (CDP) 连接 Node.js 调试端口，在 console 里输入 JavaScript 表达式并实时获取执行结果。
 
@@ -19,16 +19,16 @@
    ```bash
    cargo run --release -- console
    # 或直接使用编译好的二进制
-   ./target/release/cdp-console console
+   ./target/release/cdp-client console
    ```
 
 3. 交互示例  
    ```
-   cdp-console> 2 + 3
+   cdp-client> 2 + 3
    5
-   cdp-console> console.version
+   cdp-client> console.version
    'v20.19.0'
-   cdp-console> exit
+   cdp-client> exit
    Goodbye!
    ```
 ## 使用示例
@@ -55,8 +55,6 @@ cdp-client heap-snapshot -p 9229 -o heap_snapshot.heapsnapshot
 
 ```bash
 cargo check        # 快速检查
-cargo clippy       # lint
-cargo fmt          # 格式化
 cargo build --release
 ```
 

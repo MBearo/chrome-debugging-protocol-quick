@@ -150,7 +150,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cdp-console"
+name = "cdp-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",

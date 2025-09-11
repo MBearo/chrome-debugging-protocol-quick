@@ -12,6 +12,7 @@ use url::Url;
 #[derive(Parser)]
 #[command(name = "cdp-client")]
 #[command(about = "A Chrome DevTools Protocol client")]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -19,6 +20,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    Version,
     /// Interactive console mode
     Console {
         #[command(flatten)]
@@ -196,7 +198,7 @@ impl CDPClient {
         println!("CDP Console started. Type 'exit' to quit.");
 
         loop {
-            print!("cdp-console> ");
+            print!("cdp-client> ");
             io::stdout().flush()?;
             let mut line = String::new();
             io::stdin().read_line(&mut line)?;
@@ -503,6 +505,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Version => {
+            println!("cdp-client {}", env!("CARGO_PKG_VERSION"));
+        }
         Commands::Console { connection } => {
             let mut client = CDPClient::connect(&connection).await?;
             client.start_console().await?;
