@@ -48,8 +48,11 @@ cdp-client memory-sampling -p 9229 -d 30 -o memory_sampling.heapprofile
 5. CPU profiling
 cdp-client cpu-profile -p 9229 -d 10 -o cpu_profile.cpuprofile
 
-6. 未来的堆快照 (已预留)
+6. 堆快照 
 cdp-client heap-snapshot -p 9229 -o heap_snapshot.heapsnapshot
+
+7. 代理 
+cdp-client proxy --from 9229 --to 8080 --target-host 0.0.0.0
 
 ## 开发
 

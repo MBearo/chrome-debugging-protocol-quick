@@ -8,6 +8,164 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use url::Url;
+use warp::Filter;
+
+struct WarpProxy {
+    from_port: u16,
+    to_port: u16,
+    target_host: String,
+}
+
+impl WarpProxy {
+    fn new(from_port: u16, to_port: u16, target_host: String) -> Self {
+        Self {
+            from_port,
+            to_port,
+            target_host,
+        }
+    }
+
+    async fn start(&self) -> Result<()> {
+        let target_host = self.target_host.clone();
+        let to_port = self.to_port;
+
+        println!(
+            "Proxy server listening on http://localhost:{}",
+            self.from_port
+        );
+        println!("Proxying to {}:{}", self.target_host, self.to_port);
+
+        let proxy = warp::any()
+            .and(warp::method())
+            .and(warp::path::full())
+            .and(
+                warp::query::raw()
+                    .or(warp::any().map(|| String::new()))
+                    .unify(),
+            )
+            .and(warp::header::headers_cloned())
+            .and(warp::body::bytes())
+            .and_then(
+                move |method, path: warp::path::FullPath, query: String, headers, body| {
+                    Self::handle_proxy_request(
+                        method,
+                        path,
+                        query,
+                        headers,
+                        body,
+                        target_host.clone(),
+                        to_port,
+                    )
+                },
+            );
+
+        warp::serve(proxy)
+            .run(([127, 0, 0, 1], self.from_port))
+            .await;
+
+        Ok(())
+    }
+
+    async fn handle_proxy_request(
+        method: warp::http::Method,
+        path: warp::path::FullPath,
+        query: String,
+        headers: warp::http::HeaderMap,
+        body: warp::hyper::body::Bytes,
+        target_host: String,
+        to_port: u16,
+    ) -> Result<impl warp::Reply, warp::Rejection> {
+        // 添加调试信息
+        println!("Proxying request: {} {}", method, path.as_str());
+        
+        let mut url = format!("http://{}:{}{}", target_host, to_port, path.as_str());
+        if !query.is_empty() {
+            url.push('?');
+            url.push_str(&query);
+        }
+
+        println!("Target URL: {}", url);
+
+        let client = reqwest::Client::new();
+        
+        // 修复方法转换
+        let reqwest_method = match method {
+            warp::http::Method::GET => reqwest::Method::GET,
+            warp::http::Method::POST => reqwest::Method::POST,
+            warp::http::Method::PUT => reqwest::Method::PUT,
+            warp::http::Method::DELETE => reqwest::Method::DELETE,
+            warp::http::Method::HEAD => reqwest::Method::HEAD,
+            warp::http::Method::OPTIONS => reqwest::Method::OPTIONS,
+            warp::http::Method::PATCH => reqwest::Method::PATCH,
+            _ => {
+                println!("Unsupported method: {}", method);
+                return Err(warp::reject::reject());
+            }
+        };
+
+        let mut req = client.request(reqwest_method, &url);
+
+        // 复制头部，但跳过一些可能有问题的头部
+        for (name, value) in headers {
+            if let Some(name) = name {
+                let name_str = name.as_str();
+                // 跳过一些可能导致问题的头部
+                if name_str.to_lowercase() == "host" 
+                    || name_str.to_lowercase() == "content-length"
+                    || name_str.to_lowercase().starts_with("connection") {
+                    continue;
+                }
+                
+                if let Ok(value_str) = value.to_str() {
+                    req = req.header(name_str, value_str);
+                }
+            }
+        }
+
+        // 添加body
+        if !body.is_empty() {
+            req = req.body(body);
+        }
+
+        match req.send().await {
+            Ok(resp) => {
+                println!("Response status: {}", resp.status());
+                
+                let status = resp.status();
+                let response_headers = resp.headers().clone();
+                
+                match resp.bytes().await {
+                    Ok(body) => {
+                        let mut response = warp::http::Response::builder().status(status);
+                        
+                        // 复制响应头部
+                        for (name, value) in response_headers {
+                            if let Some(name) = name {
+                                response = response.header(name.as_str(), value);
+                            }
+                        }
+
+                        match response.body(body) {
+                            Ok(resp) => Ok(resp),
+                            Err(e) => {
+                                println!("Failed to build response: {}", e);
+                                Err(warp::reject::reject())
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("Failed to read response body: {}", e);
+                        Err(warp::reject::reject())
+                    }
+                }
+            }
+            Err(e) => {
+                println!("Request failed: {}", e);
+                Err(warp::reject::reject())
+            }
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "cdp-client")]
@@ -55,6 +213,18 @@ enum Commands {
         /// Output file path
         #[arg(short, long, default_value = "heap_snapshot.heapsnapshot")]
         output: String,
+    },
+    /// HTTP/WebSocket proxy server
+    Proxy {
+        /// Source port to listen on
+        #[arg(short, long)]
+        from: u16,
+        /// Target port to proxy to
+        #[arg(short, long)]
+        to: u16,
+        /// Target host (default: localhost)
+        #[arg(long, default_value = "localhost")]
+        target_host: String,
     },
 }
 
@@ -531,6 +701,14 @@ async fn main() -> Result<()> {
         Commands::HeapSnapshot { connection, output } => {
             let mut client = CDPClient::connect(&connection).await?;
             client.capture_heap_snapshot(&output).await?;
+        }
+        Commands::Proxy {
+            from,
+            to,
+            target_host,
+        } => {
+            let proxy = WarpProxy::new(from, to, target_host);
+            proxy.start().await?;
         }
     }
 
